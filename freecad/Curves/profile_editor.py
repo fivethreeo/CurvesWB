@@ -260,6 +260,9 @@ class InterpoCurveEditor(object):
         self.sg = self.view.getSceneGraph()
         self.setup_InteractionSeparator()
         self.update_curve()
+        viewer = self.view.getViewer()
+        self.redirect_to_scene_graph = viewer.isRedirectedToSceneGraph()
+        viewer.setRedirectToSceneGraph(True)
 
     def setup_InteractionSeparator(self):
         if self.root_inserted:
@@ -283,7 +286,8 @@ class InterpoCurveEditor(object):
             o.ovr_col = "yellow"
             o.sel_col = "green"
         self.root.register()
-        self.sg.addChild(self.root)
+        # Handle drag releases before FreeCAD's Ctrl-selection handler.
+        self.sg.insertChild(self.root, 0)
         self.root_inserted = True
         self.root.selected_objects = list()
 
@@ -513,6 +517,7 @@ class InterpoCurveEditor(object):
         return(True)
 
     def quit(self):
+        self.view.getViewer().setRedirectToSceneGraph(self.redirect_to_scene_graph)
         self.root.events.removeEventCallback(coin.SoKeyboardEvent.getClassTypeId(), self._controlCB)
         self.root.unregister()
         # self.root.removeAllChildren()

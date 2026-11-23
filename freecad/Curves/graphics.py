@@ -225,6 +225,7 @@ class InteractionSeparator(coin.SoSeparator):
         self.over_object = None
         self.selected_objects = []
         self.drag_objects = []
+        self._background_click = None
 
         self.on_drag = []
         self.on_drag_release = []
@@ -286,6 +287,8 @@ class InteractionSeparator(coin.SoSeparator):
     def highlightCB(self, attr, event_callback):
         event = event_callback.getEvent()
         pos = event.getPosition()
+        if self._background_click is not None and tuple(pos) != self._background_click:
+            self._background_click = None
         obj = self.sendRay(pos)
         self.highlightObject(obj)
 
@@ -333,11 +336,19 @@ class InteractionSeparator(coin.SoSeparator):
 
     def selectCB(self, attr, event_callback):
         event = event_callback.getEvent()
-        if (event.getState() == coin.SoMouseButtonEvent.DOWN and
-                event.getButton() == event.BUTTON1):
+        if event.getButton() != event.BUTTON1:
+            return
+        if event.getState() == coin.SoMouseButtonEvent.DOWN:
             pos = event.getPosition()
             obj = self.sendRay(pos)
-            self.selectObject(obj, event.wasCtrlDown())
+            self._background_click = tuple(pos) if obj is None and not event.wasCtrlDown() else None
+            if obj is not None and (event.wasCtrlDown() or obj not in self.selected_objects):
+                self.selectObject(obj, event.wasCtrlDown())
+        elif event.getState() == coin.SoMouseButtonEvent.UP:
+            if (self._background_click == tuple(event.getPosition())
+                    and not event.wasCtrlDown() and self.selected_objects):
+                self.selectObject(None)
+            self._background_click = None
 
     def select_all_cb(self, event_callback):
         event = event_callback.getEvent()
@@ -430,8 +441,11 @@ class InteractionSeparator(coin.SoSeparator):
                         obj.drag_start()
                     for foo in self.on_drag_start:
                         foo()
+            if obj or event.wasCtrlDown():
+                event_callback.setHandled()
 
     def dragCB(self, attr, event_callback, force=False):
+        event_callback.setHandled()
         event = event_callback.getEvent()
         b = ""
         s = ""
