@@ -262,14 +262,21 @@ class InterpoCurveEditor(object):
         self.update_curve()
 
     def setup_InteractionSeparator(self):
+        directions = self.root._directions if self.root_inserted else set()
         if self.root_inserted:
             self.sg.removeChild(self.root)
         self.root = graphics.InteractionSeparator(self.rm)
+        self.root._directions = directions
+        preferences = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/Curves")
+        self.root.reset_axes_on_release = preferences.GetBool("ResetAxisLocksAfterDrag", True)
         self.root.setName("InteractionSeparator")
         # self.root.ovr_col = "yellow"
         # self.root.sel_col = "green"
         self.root.pick_radius = 40
         self.root.on_drag.append(self.update_curve)
+        self.root.on_drag.append(self.update_status)
+        self.root.on_drag_release.append(self.update_status)
+        self.root.on_axis_change.append(self.update_status)
         #  Keyboard callback
         # self.events = coin.SoEventCallback()
         self._controlCB = self.root.events.addEventCallback(coin.SoKeyboardEvent.getClassTypeId(), self.controlCB)
@@ -286,6 +293,15 @@ class InterpoCurveEditor(object):
         self.sg.addChild(self.root)
         self.root_inserted = True
         self.root.selected_objects = list()
+        self.update_status()
+
+    def update_status(self):
+        axes = "".join(axis.upper() for axis in "xyz" if axis in self.root._directions)
+        FreeCADGui.getMainWindow().statusBar().showMessage(
+            "Move: {} | X/Y/Z: toggle axes; R: reset | "
+            "A: select all; Ctrl+click: multi-select; Shift: fine move | "
+            "I: insert; P: planar; T: tangent; S: snap; L: linear; Del: delete; Q: quit"
+            .format(axes or "free"))
 
     def compute_tangents(self):
         tans = list()
@@ -518,6 +534,7 @@ class InterpoCurveEditor(object):
         # self.root.removeAllChildren()
         self.sg.removeChild(self.root)
         self.root_inserted = False
+        FreeCADGui.getMainWindow().statusBar().clearMessage()
 
 
 def get_guide_params():

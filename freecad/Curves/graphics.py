@@ -214,7 +214,8 @@ class InteractionSeparator(coin.SoSeparator):
                  "delete": u"\uffff",
                  "axis_x": "x",
                  "axis_y": "y",
-                 "axis_z": "z"}
+                 "axis_z": "z",
+                 "reset_axes": "r"}
 
     def __init__(self, render_manager):
         super(InteractionSeparator, self).__init__()
@@ -229,8 +230,10 @@ class InteractionSeparator(coin.SoSeparator):
         self.on_drag = []
         self.on_drag_release = []
         self.on_drag_start = []
+        self.on_axis_change = []
 
-        self._direction = None
+        self._directions = set()
+        self.reset_axes_on_release = True
 
         self.events = coin.SoEventCallback()
         self += self.events, self.objects
@@ -246,6 +249,8 @@ class InteractionSeparator(coin.SoSeparator):
             coin.SoKeyboardEvent.getClassTypeId(), self.deleteCB)
         self._selectAllCB = self.events.addEventCallback(
             coin.SoKeyboardEvent.getClassTypeId(), self.selectAllCB)
+        self._axisLockCB = self.events.addEventCallback(
+            coin.SoKeyboardEvent.getClassTypeId(), self.axisLockCB)
 
     def unregister(self):
         self.events.removeEventCallback(
@@ -258,6 +263,8 @@ class InteractionSeparator(coin.SoSeparator):
             coin.SoKeyboardEvent.getClassTypeId(), self._deleteCB)
         self.events.removeEventCallback(
             coin.SoKeyboardEvent.getClassTypeId(), self._selectAllCB)
+        self.events.removeEventCallback(
+            coin.SoKeyboardEvent.getClassTypeId(), self._axisLockCB)
 
 
     def addChild(self, child):
@@ -392,14 +399,26 @@ class InteractionSeparator(coin.SoSeparator):
     
 
     def constrained_vector(self, vector):
-        if self._direction is None:
+        if not self._directions:
             return vector
-        if self._direction == InteractionSeparator.ctrl_keys["axis_x"]:
-            return [vector[0], 0, 0]
-        elif self._direction == InteractionSeparator.ctrl_keys["axis_y"]:
-            return [0, vector[1], 0]
-        elif self._direction == InteractionSeparator.ctrl_keys["axis_z"]:
-            return [0, 0, vector[2]]
+        return [vector[i] if InteractionSeparator.ctrl_keys[axis] in self._directions else 0
+                for i, axis in enumerate(("axis_x", "axis_y", "axis_z"))]
+
+    def axisLockCB(self, attr, event_callback):
+        event = event_callback.getEvent()
+        if event.getState() == event.DOWN:
+            if event.getKey() == ord(InteractionSeparator.ctrl_keys["reset_axes"]):
+                self._directions.clear()
+            else:
+                for axis in ("axis_x", "axis_y", "axis_z"):
+                    key = InteractionSeparator.ctrl_keys[axis]
+                    if event.getKey() == ord(key):
+                        self._directions.symmetric_difference_update((key,))
+                        break
+                else:
+                    return
+            for foo in self.on_axis_change:
+                foo()
 
     def grabCB(self, attr, event_callback):
         # press grab key to move an entity
@@ -454,7 +473,8 @@ class InteractionSeparator(coin.SoSeparator):
             if self._dragCB:
                 self.events.removeEventCallback(
                     coin.SoEvent.getClassTypeId(), self._dragCB)
-                self._direction = None
+                if self.reset_axes_on_release:
+                    self._directions.clear()
                 self._dragCB = None
             self.start_pos = None
             for obj in self.drag_objects:
@@ -469,17 +489,7 @@ class InteractionSeparator(coin.SoSeparator):
                     obj.drag([0, 0, 0], 1)  # set back to zero
                 self.dragCB(attr, event_callback, force=True)
                 return
-            try:
-                key = chr(event.getKey())
-            except ValueError:
-                # there is no character for this value
-                key = "_"
-            if key in [InteractionSeparator.ctrl_keys["axis_x"],
-                       InteractionSeparator.ctrl_keys["axis_y"],
-                       InteractionSeparator.ctrl_keys["axis_z"]] and key != self._direction:
-                self._direction = key
-            else:
-                self._direction = None
+            self.axisLockCB(attr, event_callback)
             diff = self.cursor_pos(event) - self.start_pos
             diff = self.constrained_vector(diff)
             for obj in self.drag_objects:

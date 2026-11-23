@@ -16,6 +16,9 @@ class CurvesWorkbench(Gui.Workbench):
     def Initialize(self):
         """This function is executed when FreeCAD starts"""
         # TODO changes module names to lower_with_underscore
+        with open(self.Icon) as icon:
+            Gui.addIcon("preferences-curves", icon.read(), "SVG")
+        Gui.addPreferencePage(CurvesPreferences, "Curves")
 
         try:
             from . import graphics
@@ -156,6 +159,29 @@ class CurvesWorkbench(Gui.Workbench):
     def GetClassName(self):
         """This function is mandatory if this is a full python workbench"""
         return "Gui::PythonWorkbench"
+
+
+class CurvesPreferences:
+    def __init__(self):
+        from PySide import QtGui
+        self.form = QtGui.QWidget()
+        self.form.setWindowTitle("Curve editing")
+        layout = QtGui.QVBoxLayout(self.form)
+        self.reset_axes = QtGui.QCheckBox("Reset axis locks after each drag")
+        self.reset_axes.setToolTip(
+            "Clear X/Y/Z axis locks when releasing the mouse. "
+            "Disable to keep locks across drags; R always clears them.")
+        layout.addWidget(self.reset_axes)
+        layout.addStretch()
+        self.loadSettings()
+
+    def loadSettings(self):
+        preferences = App.ParamGet("User parameter:BaseApp/Preferences/Mod/Curves")
+        self.reset_axes.setChecked(preferences.GetBool("ResetAxisLocksAfterDrag", True))
+
+    def saveSettings(self):
+        preferences = App.ParamGet("User parameter:BaseApp/Preferences/Mod/Curves")
+        preferences.SetBool("ResetAxisLocksAfterDrag", self.reset_axes.isChecked())
 
 
 Gui.addWorkbench(CurvesWorkbench())
