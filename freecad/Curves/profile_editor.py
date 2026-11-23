@@ -3,6 +3,7 @@
 import FreeCAD
 import FreeCADGui
 import Part
+from PySide import QtCore, QtGui
 from pivy import coin
 from freecad.Curves import _utils
 from freecad.Curves import graphics
@@ -223,6 +224,19 @@ class ConnectionLine(graphics.Line):
             self.delete()
 
 
+class AxisKeyFilter(QtCore.QObject):
+    def eventFilter(self, watched, event):
+        if (event.type() == QtCore.QEvent.ShortcutOverride
+                and event.key() in (QtCore.Qt.Key_X, QtCore.Qt.Key_Y,
+                                    QtCore.Qt.Key_Z, QtCore.Qt.Key_R)
+                and not event.modifiers() & (QtCore.Qt.ControlModifier
+                                             | QtCore.Qt.AltModifier
+                                             | QtCore.Qt.MetaModifier)):
+            event.accept()
+            return True
+        return False
+
+
 class InterpoCurveEditor(object):
     """Interpolation curve free-hand editor
     my_editor = InterpoCurveEditor([points], obj)
@@ -260,6 +274,12 @@ class InterpoCurveEditor(object):
         self.sg = self.view.getSceneGraph()
         self.setup_InteractionSeparator()
         self.update_curve()
+        window = FreeCADGui.getMainWindow().findChild(QtGui.QMdiArea).activeSubWindow()
+        self.axis_key_filter = AxisKeyFilter()
+        self.axis_key_viewer = next(
+            widget for widget in window.findChildren(QtGui.QWidget)
+            if widget.inherits("Gui::View3DInventorViewer"))
+        self.axis_key_viewer.installEventFilter(self.axis_key_filter)
 
     def setup_InteractionSeparator(self):
         directions = self.root._directions if self.root_inserted else set()
@@ -529,6 +549,7 @@ class InterpoCurveEditor(object):
         return(True)
 
     def quit(self):
+        self.axis_key_viewer.removeEventFilter(self.axis_key_filter)
         self.root.events.removeEventCallback(coin.SoKeyboardEvent.getClassTypeId(), self._controlCB)
         self.root.unregister()
         # self.root.removeAllChildren()
