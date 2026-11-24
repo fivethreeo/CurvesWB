@@ -200,6 +200,8 @@ class sketchOnSurface:
                         "Make faces from closed wires").FillFaces = False
         obj.addProperty("App::PropertyBool", "FillExtrusion", "Settings",
                         "Add extrusion faces").FillExtrusion = True
+        obj.addProperty("App::PropertyBool", "PreserveSketchWires", "Settings",
+                        "Preserve sketch wire connections when mapping across surface seams").PreserveSketchWires = False
         obj.addProperty("App::PropertyFloat", "Offset",   "Settings",
                         "Offset distance of mapped sketch").Offset = 0.0
         obj.addProperty("App::PropertyFloat", "Thickness", "Settings",
@@ -213,6 +215,11 @@ class sketchOnSurface:
         obj.addProperty("App::PropertyBool", "ConstructionBounds", "Touchup",
                         "include construction geometry in sketch bounds").ConstructionBounds = True
         obj.Proxy = self
+
+    def onDocumentRestored(self, obj):
+        if "PreserveSketchWires" not in obj.PropertiesList:
+            obj.addProperty("App::PropertyBool", "PreserveSketchWires", "Settings",
+                            "Preserve sketch wire connections when mapping across surface seams").PreserveSketchWires = False
 
     def force_closed_bspline2d(self, c2d):
         """Force close a 2D Bspline curve by moving last pole to first"""
@@ -255,42 +262,59 @@ class sketchOnSurface:
             faces.append(f)
         return faces
 
-    def map_shapelist(self, shapes, quad, face, fillfaces=False):
+    def map_shapelist(self, shapes, quad, face, fillfaces=False, preserve_sketch_wires=False):
         shapelist = []
         for i, shape in enumerate(shapes):
             debug("mapping shape #  {}".format(i + 1))
-            shapelist.extend(self.map_shape(shape, quad, face, fillfaces))
+            shapelist.extend(self.map_shape(shape, quad, face, fillfaces, preserve_sketch_wires))
             debug("Total : {} shapes".format(len(shapelist)))
         return shapelist
 
-    def map_shape(self, shape, quad, face, fillfaces=False):
+    def map_shape(self, shape, quad, face, fillfaces=False, preserve_sketch_wires=False):
         if not isinstance(shape, Part.Shape):
             return []
-        # proj = quad.project(shape.Edges)
-        new_edges = []
-        for oe in shape.Edges:
-            # debug("original edge has : {} Pcurves : {}".format(_utils.nb_pcurves(oe), oe.curveOnSurface(0)))
-            proj = quad.project([oe])
-            for e in proj.Edges:
-                # debug("edge on quad has : {} Pcurves : {}".format(_utils.nb_pcurves(e), e.curveOnSurface(0)))
-                c2d, fp, lp = quad.curveOnSurface(e)
-                if oe.isClosed() and not c2d.isClosed():
-                    self.force_closed_bspline2d(c2d)
-                ne = c2d.toShape(face.Surface, fp, lp)
-                # debug("edge on face has : {} Pcurves : {}".format(_utils.nb_pcurves(ne), ne.curveOnSurface(0)))
-                # debug(ne.Placement)
-                # debug(face.Placement)
-                # ne.Placement = face.Placement
-                vt = ne.getTolerance(1, Part.Vertex)
-                et = ne.getTolerance(1, Part.Edge)
-                if vt < et:
-                    ne.fixTolerance(et, Part.Vertex)
-                    # debug("fixing tolerance : {0:e} -> {1:e}".format(vt,et))
-                new_edges.append(ne)
-            # else: # except TypeError:
-                # error("Failed to get 2D curve")
-        sorted_edges = Part.sortEdges(new_edges)
-        wirelist = [Part.Wire(el) for el in sorted_edges]
+        # Optionally sort before periodic seams make sketch vertices coincide.
+        edge_groups = Part.sortEdges(shape.Edges) if preserve_sketch_wires else [shape.Edges]
+        wirelist = []
+        unsorted_edges = []
+        for edges in edge_groups:
+            new_edges = []
+            complete = True
+            for oe in edges:
+                # debug("original edge has : {} Pcurves : {}".format(_utils.nb_pcurves(oe), oe.curveOnSurface(0)))
+                proj = quad.project([oe])
+                if len(proj.Edges) != 1:
+                    complete = False
+                for e in proj.Edges:
+                    # debug("edge on quad has : {} Pcurves : {}".format(_utils.nb_pcurves(e), e.curveOnSurface(0)))
+                    c2d, fp, lp = quad.curveOnSurface(e)
+                    if oe.isClosed() and not c2d.isClosed():
+                        self.force_closed_bspline2d(c2d)
+                    ne = c2d.toShape(face.Surface, fp, lp)
+                    # debug("edge on face has : {} Pcurves : {}".format(_utils.nb_pcurves(ne), ne.curveOnSurface(0)))
+                    # debug(ne.Placement)
+                    # debug(face.Placement)
+                    # ne.Placement = face.Placement
+                    vt = ne.getTolerance(1, Part.Vertex)
+                    et = ne.getTolerance(1, Part.Edge)
+                    if vt < et:
+                        ne.fixTolerance(et, Part.Vertex)
+                        # debug("fixing tolerance : {0:e} -> {1:e}".format(vt,et))
+                    new_edges.append(ne)
+                # else: # except TypeError:
+                    # error("Failed to get 2D curve")
+            if new_edges:
+                if preserve_sketch_wires and complete:
+                    try:
+                        wire = Part.Wire(new_edges)
+                        if len(wire.Edges) == len(new_edges) and (
+                                not Part.Wire(edges).isClosed() or wire.isClosed()):
+                            wirelist.append(wire)
+                            continue
+                    except Part.OCCError:
+                        pass
+                unsorted_edges.extend(new_edges)
+        wirelist.extend(Part.Wire(el) for el in Part.sortEdges(unsorted_edges))
         if fillfaces:
             return self.build_faces(wirelist, face)
         else:
@@ -391,13 +415,14 @@ class sketchOnSurface:
                 input_shapes.append(sh)
         shapes_1 = []
         shapes_2 = []
+        preserve_sketch_wires = getattr(obj, "PreserveSketchWires", False)
         if (obj.Offset == 0):
             shapes_1 = self.map_shapelist(
-                input_shapes, quad, face, obj.FillFaces)
+                input_shapes, quad, face, obj.FillFaces, preserve_sketch_wires)
         else:
             f1 = self.offset_face(face, obj.Offset)
             shapes_1 = self.map_shapelist(
-                input_shapes, quad, f1.Face1, obj.FillFaces)
+                input_shapes, quad, f1.Face1, obj.FillFaces, preserve_sketch_wires)
         if (obj.Thickness == 0):
             if shapes_1:
                 obj.Shape = Part.Compound(shapes_1)
@@ -405,7 +430,7 @@ class sketchOnSurface:
         else:
             f2 = self.offset_face(face, obj.Offset + obj.Thickness)
             shapes_2 = self.map_shapelist(
-                input_shapes, quad, f2.Face1, obj.FillFaces)
+                input_shapes, quad, f2.Face1, obj.FillFaces, preserve_sketch_wires)
             if not obj.FillExtrusion:
                 if shapes_1 or shapes_2:
                     obj.Shape = Part.Compound(shapes_1 + shapes_2)
