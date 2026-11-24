@@ -61,6 +61,7 @@ class MarkerOnShape(graphics.Marker):
             self.snap_shape = sh
         elif isinstance(sh, (tuple, list)):
             self.sublink = sh
+        self.alter_color()
 
     def subshape_from_sublink(self, o):
         name = o[1][0]
@@ -140,7 +141,11 @@ class MarkerOnShape(graphics.Marker):
         elif isinstance(self._shape, Part.Face):
             self.set_color("magenta")
         else:
-            self.set_color("black")
+            color = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/View").GetUnsigned(
+                "DefaultShapeVertexColor", 0x000000ff)
+            graphics.COLORS["free_point"] = tuple((color >> shift & 255) / 255.0
+                                                  for shift in (24, 16, 8))
+            self.set_color("free_point")
 
     def __repr__(self):
         return("MarkerOnShape({})".format(self._shape))
